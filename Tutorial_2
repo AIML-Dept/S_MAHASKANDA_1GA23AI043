@@ -1,0 +1,38 @@
+# Install the required packages (run only once)
+!pip install qiskit qiskit-aer qiskit[visualization] matplotlib
+
+from qiskit import QuantumCircuit
+from qiskit.quantum_info import Statevector
+from qiskit.visualization import plot_bloch_multivector
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Create a single-qubit circuit
+circuit = QuantumCircuit(1)
+
+# Apply Hadamard gate to create superposition
+circuit.h(0)
+
+# Generate a random phase shift
+random_angle = np.random.uniform(0, np.pi / 8)
+
+# Apply the phase gate
+circuit.p(random_angle, 0)
+
+# Calculate the quantum state
+final_state = Statevector.from_instruction(circuit)
+
+# Display the circuit
+print("Quantum Circuit:")
+print(circuit.draw())
+
+# Display the phase angle
+print("\nApplied Phase Shift:", round(random_angle, 4), "radians")
+
+# Display the resulting statevector
+print("\nStatevector:")
+print(final_state)
+
+# Plot the Bloch sphere
+fig = plot_bloch_multivector(final_state)
+plt.show()
