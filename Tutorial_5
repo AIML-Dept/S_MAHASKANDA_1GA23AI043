@@ -1,0 +1,155 @@
+from qiskit import QuantumCircuit, transpile
+from qiskit_aer import AerSimulator
+
+simulator = AerSimulator()
+shots_list = [100, 1000, 10000]
+
+for shots in shots_list:
+    qc = QuantumCircuit(1, 1)
+    qc.h(0)
+    qc.measure(0, 0)
+
+    compiled = transpile(qc, simulator)
+    job = simulator.run(compiled, shots=shots)
+    counts = job.result().get_counts()
+
+    zeros = counts.get("0", 0)
+    ones = counts.get("1", 0)
+
+    print("Shots:", shots)
+    print("0:", zeros, "Probability:", zeros / shots)
+    print("1:", ones, "Probability:", ones / shots)
+    print()
+
+
+# //-------------------------------------------------//
+
+from qiskit import QuantumCircuit, transpile
+from qiskit_aer import AerSimulator
+
+simulator = AerSimulator()
+
+# Prepare |+> = H|0>, then apply H before measurement.
+plus = QuantumCircuit(1, 1)
+plus.h(0)
+plus.h(0)
+plus.measure(0, 0)
+
+# Prepare |-> = H|1>, then apply H before measurement.
+minus = QuantumCircuit(1, 1)
+minus.x(0)
+minus.h(0)
+minus.h(0)
+minus.measure(0, 0)
+
+for name, qc in [("|+>", plus), ("|->", minus)]:
+    compiled = transpile(qc, simulator)
+    result = simulator.run(compiled, shots=1000).result()
+    print(name, result.get_counts())
+
+# -----------------------------------------------------------
+
+from qiskit import QuantumCircuit, transpile
+from qiskit_aer import AerSimulator
+
+simulator = AerSimulator()
+
+# Create the Bell state (|00> + |11>) / sqrt(2).
+qc = QuantumCircuit(2, 1)
+qc.h(0)
+qc.cx(0, 1)
+
+# Measure only qubit 0.
+qc.measure(0, 0)
+
+compiled = transpile(qc, simulator)
+result = simulator.run(compiled, shots=1000).result()
+counts = result.get_counts()
+
+print("Measurement of qubit 0:", counts)
+print("If qubit 0 is measured as 0, qubit 1 collapses to |0>.")
+print("If qubit 0 is measured as 1, qubit 1 collapses to |1>.")
+print("Thus, the unmeasured qubit is perfectly correlated with qubit 0.")
+
+
+# --------------------------------------------------------------------------
+
+
+import math
+from qiskit import QuantumCircuit, transpile
+from qiskit_aer import AerSimulator
+
+simulator = AerSimulator()
+
+shots = 5000
+
+# In a simulation, choose an unknown angle only to generate data.
+# The estimator below does not use this value.
+hidden_theta = math.radians(60)
+
+qc = QuantumCircuit(1, 1)
+qc.ry(hidden_theta, 0)
+qc.measure(0, 0)
+
+compiled = transpile(qc, simulator)
+result = simulator.run(compiled, shots=shots).result()
+counts = result.get_counts()
+
+n1 = counts.get("1", 0)
+p1 = n1 / shots
+
+# For Ry(theta)|0>, P(1) = sin^2(theta/2).
+theta_est = 2 * math.asin(math.sqrt(p1))
+theta_est_deg = math.degrees(theta_est)
+
+print("Counts:", counts)
+print("Estimated P(1):", p1)
+print("Estimated rotation angle (degrees):", theta_est_deg)
+
+
+# -------------------------------------------------------------------
+
+
+import math
+from scipy.stats import chisquare
+from qiskit import QuantumCircuit, transpile
+from qiskit_aer import AerSimulator
+
+simulator = AerSimulator()
+shots = 1000
+
+def quantum_bits(n):
+    qc = QuantumCircuit(1, 1)
+    qc.h(0)
+    qc.measure(0, 0)
+
+    compiled = transpile(qc, simulator)
+    result = simulator.run(compiled, shots=n).result()
+    counts = result.get_counts()
+
+    return [counts.get("0", 0), counts.get("1", 0)]
+
+# Quantum source: test against an unbiased distribution.
+q_counts = quantum_bits(shots)
+q_stat, q_p = chisquare(q_counts, f_exp=[shots / 2, shots / 2])
+
+# Biased classical source with P(1)=0.60.
+biased_ones = sum(1 for _ in range(shots) if __import__("random").random() < 0.60)
+biased_counts = [shots - biased_ones, biased_ones]
+b_stat, b_p = chisquare(biased_counts, f_exp=[shots / 2, shots / 2])
+
+print("Quantum counts:", q_counts)
+print("Quantum chi-square:", q_stat, "p-value:", q_p)
+
+print("Biased classical counts:", biased_counts)
+print("Biased classical chi-square:", b_stat, "p-value:", b_p)
+
+alpha = 0.05
+print("Quantum conclusion:", "Reject H0" if q_p < alpha else "Do not reject H0")
+print("Biased classical conclusion:", "Reject H0" if b_p < alpha else "Do not reject H0")
+
+
+# ------------------------------------------------------------------------------------------
+
+
+
