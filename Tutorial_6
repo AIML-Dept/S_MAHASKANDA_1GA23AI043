@@ -1,0 +1,542 @@
+import itertools
+import random
+import numpy as np
+import matplotlib.pyplot as plt
+
+from qiskit import QuantumCircuit, transpile
+from qiskit_aer import AerSimulator
+
+
+def gf2_rank(rows, n):
+    rows = [r for r in rows if r != 0]
+    rank = 0
+
+    for col in range(n - 1, -1, -1):
+        pivot = None
+
+        for i in range(rank, len(rows)):
+            if (rows[i] >> col) & 1:
+                pivot = i
+                break
+
+        if pivot is None:
+            continue
+
+        rows[rank], rows[pivot] = rows[pivot], rows[rank]
+
+        for i in range(len(rows)):
+            if i != rank and ((rows[i] >> col) & 1):
+                rows[i] ^= rows[rank]
+
+        rank += 1
+
+    return rank
+
+
+def bits_to_int(bits):
+    return int(bits, 2)
+
+
+def int_to_bits(x, n):
+    return format(x, f"0{n}b")
+
+
+def dot_gf2(a, b):
+    return (a & b).bit_count() % 2
+
+
+def simon_function_value(x, s):
+    n = len(s)
+
+    if len(x) != n:
+        raise ValueError("x and s must have the same length.")
+
+    if any(c not in "01" for c in s + x):
+        raise ValueError("Bitstrings must contain only 0 and 1.")
+
+    if set(s) == {"0"}:
+        return x
+
+    s_int = bits_to_int(s)
+    x_int = bits_to_int(x)
+
+    pivot = next(i for i, bit in enumerate(s) if bit == "1")
+
+    rows = []
+
+    for i in range(n):
+        if i == pivot:
+            continue
+
+        row = 0
+
+        bit_i = n - 1 - i
+        bit_p = n - 1 - pivot
+
+        row ^= (1 << bit_i)
+
+        if s[i] == "1":
+            row ^= (1 << bit_p)
+
+        rows.append(row)
+
+    output_bits = []
+
+    for row in rows:
+        output_bits.append(str(dot_gf2(row, x_int)))
+
+    output_bits.append("0")
+
+    return "".join(output_bits)
+
+
+def verify_simon_function(s):
+    n = len(s)
+
+    values = {
+        x: simon_function_value(x, s)
+        for x in map(lambda z: int_to_bits(z, n), range(2 ** n))
+    }
+
+    for x, y in itertools.product(values, repeat=2):
+
+        same_function_value = values[x] == values[y]
+
+        x_int = bits_to_int(x)
+        y_int = bits_to_int(y)
+        s_int = bits_to_int(s)
+
+        valid_collision = (
+            y_int == x_int or
+            y_int == (x_int ^ s_int)
+        )
+
+        if same_function_value != valid_collision:
+            return False, values
+
+    return True, values
+
+
+def build_simon_oracle(s):
+    n = len(s)
+
+    if set(s) == {"0"}:
+        matrix_rows = []
+
+        for i in range(n):
+            row = 1 << (n - 1 - i)
+            matrix_rows.append(row)
+
+    else:
+        s_int = bits_to_int(s)
+
+        pivot = next(i for i, bit in enumerate(s) if bit == "1")
+
+        matrix_rows = []
+
+        for i in range(n):
+            if i == pivot:
+                continue
+
+            row = 0
+
+            bit_i = n - 1 - i
+            bit_p = n - 1 - pivot
+
+            row ^= 1 << bit_i
+
+            if s[i] == "1":
+                row ^= 1 << bit_p
+
+            matrix_rows.append(row)
+
+        matrix_rows.append(0)
+
+    oracle = QuantumCircuit(2 * n, name=f"Oracle_s={s}")
+
+    for output_index, row in enumerate(matrix_rows):
+
+        target = n + output_index
+
+        for input_index in range(n):
+
+            bit_position = n - 1 - input_index
+
+            if (row >> bit_position) & 1:
+                oracle.cx(input_index, target)
+
+    return oracle
+
+
+def print_truth_table(s):
+    print(f"\nTruth table for secret s = {s}")
+    print("-" * 30)
+    print("   x    f(x)")
+
+    n = len(s)
+
+    for i in range(2 ** n):
+        x = int_to_bits(i, n)
+        fx = simon_function_value(x, s)
+        print(f"  {x} -> {fx}")
+
+
+def build_simon_circuit(s):
+    n = len(s)
+
+    qc = QuantumCircuit(2 * n, n)
+
+    input_qubits = list(range(n))
+    output_qubits = list(range(n, 2 * n))
+
+    qc.h(input_qubits)
+
+    oracle = build_simon_oracle(s)
+    qc.compose(oracle, qubits=range(2 * n), inplace=True)
+
+    qc.h(input_qubits)
+
+    qc.measure(input_qubits, range(n))
+
+    return qc
+
+
+def get_measurement_samples(s, shots=1024, seed=1234):
+    qc = build_simon_circuit(s)
+
+    simulator = AerSimulator()
+
+    compiled = transpile(qc, simulator)
+
+    result = simulator.run(
+        compiled,
+        shots=shots,
+        seed_simulator=seed
+    ).result()
+
+    counts = result.get_counts()
+
+    samples = []
+
+    for measured_string, count in counts.items():
+
+        y = measured_string.replace(" ", "")[::-1]
+
+        samples.extend([y] * count)
+
+    return samples, counts
+
+
+def collect_independent_equations(s, shots=4096, seed=1234):
+    n = len(s)
+
+    if set(s) == {"0"}:
+        return ["0" * n]
+
+    samples, counts = get_measurement_samples(
+        s,
+        shots=shots,
+        seed=seed
+    )
+
+    independent = []
+    rows = []
+
+    for y in samples:
+
+        y_int = bits_to_int(y)
+
+        if y_int == 0:
+            continue
+
+        trial_rows = rows + [y_int]
+
+        if gf2_rank(trial_rows, n) > len(rows):
+            rows.append(y_int)
+            independent.append(y)
+
+        if len(rows) == n - 1:
+            break
+
+    return independent
+
+
+def solve_secret_gf2(equations, n):
+    rows = [bits_to_int(eq) for eq in equations if int(eq, 2) != 0]
+
+    if not rows:
+        return None
+
+    candidates = []
+
+    for s_int in range(1, 2 ** n):
+        if all(dot_gf2(row, s_int) == 0 for row in rows):
+            candidates.append(int_to_bits(s_int, n))
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    return None
+
+
+def run_four_bit_example():
+    s = "1011"
+
+    print("\n" + "=" * 60)
+    print("HARD: 4-bit Simon algorithm")
+    print("=" * 60)
+
+    correct, table = verify_simon_function(s)
+
+    print(f"Oracle satisfies Simon promise: {correct}")
+
+    equations = collect_independent_equations(
+        s,
+        shots=4096,
+        seed=2026
+    )
+
+    print("\nIndependent equations:")
+
+    for equation in equations:
+        print(f"  {equation} . s = 0 (mod 2)")
+
+    recovered = solve_secret_gf2(
+        equations,
+        len(s)
+    )
+
+    print(f"\nActual secret:    {s}")
+    print(f"Recovered secret: {recovered}")
+
+    assert recovered == s
+
+    return equations, recovered
+
+
+def classical_query_lower_bound(n):
+    return max(1, 2 ** (n / 2 - 1))
+
+
+def quantum_query_estimate(n):
+    return max(1, n)
+
+
+def plot_speedup(max_n=20):
+    lengths = np.arange(2, max_n + 1)
+
+    classical = np.array([
+        classical_query_lower_bound(n)
+        for n in lengths
+    ])
+
+    quantum = np.array([
+        quantum_query_estimate(n)
+        for n in lengths
+    ])
+
+    speedup = classical / quantum
+
+    plt.figure(figsize=(10, 6))
+
+    plt.semilogy(
+        lengths,
+        classical,
+        "o-",
+        label="Classical query scale"
+    )
+
+    plt.semilogy(
+        lengths,
+        quantum,
+        "s-",
+        label="Simon quantum queries"
+    )
+
+    plt.xlabel("Secret-string length n")
+    plt.ylabel("Oracle queries")
+    plt.title("Simon: Classical vs Quantum Oracle Queries")
+    plt.grid(True, which="both", alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    plt.figure(figsize=(10, 6))
+
+    plt.semilogy(
+        lengths,
+        speedup,
+        "o-",
+        color="purple"
+    )
+
+    plt.xlabel("Secret-string length n")
+    plt.ylabel("Approximate query speedup")
+    plt.title("Approximate Query-Complexity Speedup")
+    plt.grid(True, which="both", alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+    return lengths, classical, quantum, speedup
+
+
+def simon_algorithm(secret, shots=4096, seed=1234, verbose=True):
+    if not isinstance(secret, str):
+        raise TypeError("secret must be a string.")
+
+    if len(secret) == 0:
+        raise ValueError("secret cannot be empty.")
+
+    if any(bit not in "01" for bit in secret):
+        raise ValueError("secret must contain only 0 and 1.")
+
+    n = len(secret)
+
+    if set(secret) == {"0"}:
+
+        if verbose:
+            print("\nAll-zero Simon secret detected.")
+            print(
+                "The oracle is one-to-one, so the ordinary "
+                "Simon equations are insufficient to recover 0^n."
+            )
+            print("Handled explicitly as the s = 0^n edge case.")
+
+        return "0" * n
+
+    correct, _ = verify_simon_function(secret)
+
+    if not correct:
+        raise RuntimeError(
+            "Generated oracle does not satisfy the Simon promise."
+        )
+
+    equations = collect_independent_equations(
+        secret,
+        shots=shots,
+        seed=seed
+    )
+
+    if verbose:
+        print(f"\nSecret length: {n}")
+        print(f"Independent equations collected: {len(equations)}")
+
+        for eq in equations:
+            print(f"  {eq} · s = 0 (mod 2)")
+
+    recovered = solve_secret_gf2(
+        equations,
+        n
+    )
+
+    if recovered is None:
+        raise RuntimeError(
+            "Could not obtain enough independent equations. "
+            "Increase the number of shots."
+        )
+
+    if verbose:
+        print(f"Recovered secret: {recovered}")
+
+    return recovered
+
+
+if __name__ == "__main__":
+
+    print("=" * 60)
+    print("EASY: Oracle for s = 110")
+    print("=" * 60)
+
+    secret = "110"
+
+    valid, _ = verify_simon_function(secret)
+
+    print_truth_table(secret)
+
+    print("\nOracle correctness:", "PASS" if valid else "FAIL")
+
+    assert valid
+
+    print("\n" + "=" * 60)
+    print("MEDIUM: Full Simon circuit for s = 110")
+    print("=" * 60)
+
+    qc = build_simon_circuit("110")
+
+    print("\nSimon circuit:")
+    print(qc.draw())
+
+    equations = collect_independent_equations(
+        "110",
+        shots=4096,
+        seed=1234
+    )
+
+    print("\nIndependent measurement equations:")
+
+    for y in equations:
+        print(f"  {y} · s = 0 (mod 2)")
+
+    recovered = solve_secret_gf2(
+        equations,
+        3
+    )
+
+    print("\nRecovered secret:", recovered)
+
+    assert recovered == "110"
+
+    run_four_bit_example()
+
+    print("\n" + "=" * 60)
+    print("REAL-WORLD: Query-complexity comparison")
+    print("=" * 60)
+
+    lengths, classical, quantum, speedup = plot_speedup(
+        max_n=20
+    )
+
+    print("\n n | classical scale | Simon | ratio")
+    print("-" * 42)
+
+    for n, c, q, sp in zip(
+        lengths,
+        classical,
+        quantum,
+        speedup
+    ):
+        print(
+            f"{n:2d} | "
+            f"{c:15.2f} | "
+            f"{q:5.0f} | "
+            f"{sp:8.2f}x"
+        )
+
+    print("\n" + "=" * 60)
+    print("CHALLENGE: Generalised Simon solver")
+    print("=" * 60)
+
+    test_secrets = [
+        "1",
+        "10",
+        "101",
+        "110",
+        "1011",
+        "11010",
+        "0000"
+    ]
+
+    for secret in test_secrets:
+
+        recovered = simon_algorithm(
+            secret,
+            shots=4096,
+            seed=42,
+            verbose=False
+        )
+
+        print(
+            f"secret = {secret:>6s} "
+            f"-> recovered = {recovered:>6s} "
+            f"{'PASS' if recovered == secret else 'FAIL'}"
+        )
