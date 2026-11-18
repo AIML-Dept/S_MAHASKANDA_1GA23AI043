@@ -1,0 +1,328 @@
+//Tutoria 1 :
+from qiskit import QuantumCircuit
+from qiskit_aer import AerSimulator
+
+# Initialize circuit:
+# 2 qubits:
+# q0 = input qubit
+# q1 = ancilla qubit
+# 1 classical bit
+qc = QuantumCircuit(2, 1)
+
+# Step 1: State preparation
+qc.x(1)          # Set ancilla to |1>
+qc.h(0)          # Input qubit into superposition
+qc.h(1)          # Ancilla into |->
+
+qc.barrier()
+
+# Step 2: Oracle for BALANCED function f(x) = x
+# If input q0 is |1>, flip ancilla q1
+qc.cx(0, 1)
+
+qc.barrier()
+
+# Step 3: Interference on input qubit
+qc.h(0)
+
+qc.barrier()
+
+# Step 4: Measure input qubit
+qc.measure(0, 0)
+
+# Display information
+print("=== DEUTSCH'S ALGORITHM (BALANCED f(x)=x) ===")
+print("Circuit Diagram:")
+print(qc.draw(output="text"))
+print()
+
+# Run simulation
+simulator = AerSimulator()
+
+result = simulator.run(
+    qc,
+    shots=1024
+).result()
+
+counts = result.get_counts()
+
+print(f"Measurement Counts (1024 shots): {counts}")
+
+# Determine function type
+if '0' in counts and len(counts) == 1:
+    print("Function Type: Constant")
+else:
+    print("Function Type: Balanced")
+
+
+//Tutorial 2:
+from qiskit import QuantumCircuit
+from qiskit_aer import AerSimulator
+
+# Initialize circuit:
+# q0 = input qubit
+# q1 = ancilla qubit
+# 1 classical bit
+qc_medium = QuantumCircuit(2, 1)
+
+# Step 1: State preparation
+qc_medium.x(1)          # Set ancilla to |1>
+qc_medium.h(0)          # Input qubit into superposition
+qc_medium.h(1)          # Ancilla into |->
+
+qc_medium.barrier()
+
+# Step 2: Oracle for balanced function f(x) = 1 XOR x
+# First apply CNOT for f(x) = x
+qc_medium.cx(0, 1)
+
+# Add X to implement the constant 1 part
+qc_medium.x(1)
+
+qc_medium.barrier()
+
+# Step 3: Interference on input qubit
+qc_medium.h(0)
+
+qc_medium.barrier()
+
+# Step 4: Measure input qubit
+qc_medium.measure(0, 0)
+
+# Display circuit
+print("=== MEDIUM: DEUTSCH'S ALGORITHM (BALANCED f(x)=1 XOR x) ===")
+print("Circuit Diagram:")
+print(qc_medium.draw(output="text"))
+print()
+
+# Run simulation
+simulator = AerSimulator()
+
+result = simulator.run(
+    qc_medium,
+    shots=1024
+).result()
+
+counts = result.get_counts()
+
+print(f"Measurement Counts (1024 shots): {counts}")
+
+# Determine function type
+if '0' in counts and len(counts) == 1:
+    print("Function Type: Constant")
+else:
+    print("Function Type: Balanced")
+
+
+//Tutorial 3
+from qiskit import QuantumCircuit
+from qiskit_aer import AerSimulator
+
+
+def build_deutsch_circuit(oracle_type: str):
+    qc = QuantumCircuit(2, 1)
+
+    # Step 1: Prepare |01> -> |+->
+    qc.x(1)
+    qc.h(0)
+    qc.h(1)
+
+    qc.barrier()
+
+    # Step 2: Select Oracle
+    if oracle_type == "constant_0":
+        # f(x) = 0
+        pass
+
+    elif oracle_type == "constant_1":
+        # f(x) = 1
+        qc.x(1)
+
+    elif oracle_type == "balanced_identity":
+        # f(x) = x
+        qc.cx(0, 1)
+
+    elif oracle_type == "balanced_not":
+        # f(x) = NOT x
+        qc.x(1)
+        qc.cx(0, 1)
+
+    else:
+        raise ValueError("Unknown oracle type")
+
+    qc.barrier()
+
+    # Step 3: Interference
+    qc.h(0)
+
+    qc.barrier()
+
+    # Step 4: Measurement
+    qc.measure(0, 0)
+
+    return qc
+
+
+# -------------------------------------------------
+# MAIN PROGRAM
+# -------------------------------------------------
+
+print("=== HARD: DEUTSCH'S ALGORITHM ===")
+print("Testing Four Different Oracles")
+print("=" * 60)
+
+simulator = AerSimulator()
+
+oracle_names = [
+    "constant_0",
+    "constant_1",
+    "balanced_identity",
+    "balanced_not"
+]
+
+results = {}
+
+for name in oracle_names:
+
+    circuit = build_deutsch_circuit(name)
+
+    # Run 1000 shots
+    result = simulator.run(
+        circuit,
+        shots=1000
+    ).result()
+
+    counts = result.get_counts()
+
+    # Get measured result
+    measured_bit = max(counts, key=counts.get)
+
+    # Classify function
+    if measured_bit == "0":
+        classification = "CONSTANT"
+    else:
+        classification = "BALANCED"
+
+    results[name] = measured_bit
+
+    print(f"\nOracle: {name}")
+    print(f"Measurement Counts: {counts}")
+    print(f"Measured Output: {measured_bit}")
+    print(f"Function Type: {classification}")
+
+    print("-" * 60)
+
+
+# -------------------------------------------------
+# FINAL SUMMARY
+# -------------------------------------------------
+
+print("\n=== FINAL SUMMARY ===")
+
+for oracle, output in results.items():
+
+    if output == "0":
+        function_type = "Constant"
+    else:
+        function_type = "Balanced"
+
+    print(
+        f"{oracle:<22} -> Output: {output} -> {function_type}"
+    )
+
+
+//Tutorial 3:
+
+from qiskit import QuantumCircuit
+from qiskit_aer import AerSimulator
+
+
+def conceptual_classification_circuit():
+    # Demonstration of phase kickback for binary classification
+    # q0 = Feature register
+    # q1 = Label / oracle ancilla
+
+    qc = QuantumCircuit(2, 1)
+
+    # -------------------------------------------------
+    # Step 1: Encode feature state
+    # -------------------------------------------------
+    qc.h(0)
+
+    # Prepare ancilla in |-> state
+    qc.x(1)
+    qc.h(1)
+
+    qc.barrier()
+
+    # -------------------------------------------------
+    # Step 2: Classification Oracle
+    # -------------------------------------------------
+    # Modified boundary condition:
+    # Apply X to q0 before and after the CNOT.
+    # This reverses the feature condition being tagged.
+    qc.x(0)
+    qc.cx(0, 1)
+    qc.x(0)
+
+    qc.barrier()
+
+    # -------------------------------------------------
+    # Step 3: Interference
+    # -------------------------------------------------
+    qc.h(0)
+
+    qc.barrier()
+
+    # -------------------------------------------------
+    # Step 4: Readout
+    # -------------------------------------------------
+    qc.measure(0, 0)
+
+    return qc
+
+
+# Build classifier circuit
+qc_classifier = conceptual_classification_circuit()
+
+# Display results
+print("=== REAL-WORLD: MODIFIED PHASE KICKBACK BINARY CLASSIFICATION ===")
+print("Conceptual Decision Circuit Diagram:")
+print(qc_classifier.draw(output="text"))
+print()
+
+# Run simulation
+simulator = AerSimulator()
+
+result = simulator.run(
+    qc_classifier,
+    shots=1024
+).result()
+
+counts = result.get_counts()
+
+print("Measurement Counts:", counts)
+
+# Determine classification
+measured_bit = max(counts, key=counts.get)
+
+if measured_bit == "0":
+    classification = "Class A"
+else:
+    classification = "Class B"
+
+print(f"Measured Output: {measured_bit}")
+print(f"Predicted Classification: {classification}")
+
+print(
+    "\nConceptual Mapping:\n"
+    "1. Feature Encoding: Qubit q0 represents the feature state.\n"
+    "2. Boundary Oracle: The modified oracle evaluates the opposite\n"
+    "   feature condition relative to the original circuit.\n"
+    "3. Phase Kickback: The |-> ancilla converts the oracle response\n"
+    "   into a phase change on the feature state.\n"
+    "4. Interference Readout: The final Hadamard converts the phase\n"
+    "   difference into a computational-basis result.\n"
+    "5. Classification: Output 0 corresponds to Class A, while\n"
+    "   output 1 corresponds to Class B."
+)
